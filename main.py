@@ -31,16 +31,21 @@ class BDDApp(QMainWindow):
         splitter.setStretchFactor(1, 2) # Dá mais espaço ao navegador
         self.setCentralWidget(splitter)
 
-        # 4. Orquestração (Conectar os componentes)
+        self.editor.request_start_inspection.connect(lambda: self.inspector.toggle_inspection(True))
+
         self.inspector.element_selected.connect(self.on_element_captured)
 
+
     def on_element_captured(self, selector):
-        step_text = self.editor.get_selected_step_text()
-        if step_text:
+        item = self.editor.list_steps.currentItem()
+        if item:
+            # 2. Marca no editor (fica verde e ganha o check)
             self.editor.mark_step_as_mapped(selector)
-            print(f"Vinculado: {step_text} -> {selector}")
+            # 3. Desliga a inspeção para dar feedback de "Tarefa Concluída"
+            self.inspector.toggle_inspection(False)
         else:
-            QMessageBox.warning(self, "Aviso", "Selecione um step na lista antes de clicar no elemento!")
+            # Se não houver step selecionado, avise o usuário
+            QMessageBox.warning(self, "Atenção", "Selecione um Step na lista antes de capturar!")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
