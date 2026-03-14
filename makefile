@@ -1,8 +1,13 @@
 # Variáveis
 PYTHON = uv run python
 PLAYWRIGHT = uv run playwright
+OLLAMA_MODEL = llama3
 
-.PHONY: help install setup update run-ui clean test
+# Caminhos dos Docker Compose
+DOCKER_NVIDIA = containers/nvidia/docker-compose.yaml
+DOCKER_MAC = containers/mac/docker-compose.yaml
+
+.PHONY: help install setup update run-ui clean test ai-setup-mac ai-run-mac ai-up-nvidia ai-down-nvidia ai-up-mac-docker ai-down-mac-docker
 
 help: ## Exibe esta ajuda
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -10,7 +15,7 @@ help: ## Exibe esta ajuda
 install: ## Instala as dependências do projeto usando uv
 	uv sync
 
-setup: install ## Detect OS and install dependencies + Playwright browsers
+setup: install ## Detecta o SO e instala dependências + Playwright
 	@echo "🔍 Detecting Operating System..."
 	@OS=$$(uname -s); \
 	if [ "$$OS" = "Darwin" ]; then \
@@ -21,34 +26,43 @@ setup: install ## Detect OS and install dependencies + Playwright browsers
 			echo "🎩 Fedora detected. Installing system dependencies via DNF..."; \
 			sudo dnf install -y libicu libjpeg-turbo libwoff gstreamer1.0-libav; \
 			$(PLAYWRIGHT) install chromium; \
-		elif [ -f /etc/debian_version ] || [ -f /etc/lsb-release ]; then \
-			echo "🐧 Ubuntu/Debian detected. Installing system dependencies via APT..."; \
-			sudo $(PLAYWRIGHT) install-deps chromium; \
-			$(PLAYWRIGHT) install chromium; \
 		else \
-			echo "❓ Linux distribution unknown. Attempting generic install..."; \
+			echo "🐧 Linux detected. Installing Playwright..."; \
 			$(PLAYWRIGHT) install --with-deps chromium; \
 		fi \
 	fi
 	@echo "✅ Setup complete!"
 
-update: ## Atualiza as dependências
-	uv lock --upgrade
+ai-setup-mac: ## (macOS Nativo) Instala Ollama e baixa o modelo
+	@echo "🚀 Setting up Ollama for macOS..."
+	@if ! command -v ollama >/dev/null 2>&1; then brew install --cask ollama; fi
+	@ollama serve > /dev/null 2>&1 & sleep 5 && ollama pull $(OLLAMA_MODEL)
+	@echo "✅ AI Setup complete!"
 
-run-ui: ## Inicia a interface gráfica (BDDForm)
+ai-run-mac: ## (macOS Nativo) Garante que o Ollama está rodando
+	@pgrep -x "ollama" > /dev/null || (open -a Ollama &)
+
+ai-up-nvidia: ## (Linux/NVIDIA) Sobe o container Ollama com GPU CUDA
+	@echo "🟢 Starting Ollama NVIDIA Container..."
+	docker compose -f $(DOCKER_NVIDIA) up -d
+	docker exec -it ollama_nvidia ollama pull $(OLLAMA_MODEL)
+
+ai-down-nvidia: ## (Linux/NVIDIA) Para o container NVIDIA
+	docker compose -f $(DOCKER_NVIDIA) down
+
+ai-up-mac-docker: ## (macOS/Docker) Sobe o container Ollama no Mac
+	@echo "🟢 Starting Ollama Mac Docker Container..."
+	docker compose -f $(DOCKER_MAC) up -d
+	docker exec -it ollama_mac ollama pull $(OLLAMA_MODEL)
+
+ai-down-mac-docker: ## (macOS/Docker) Para o container Mac
+	docker compose -f $(DOCKER_MAC) down
+
+run-ui: ## Inicia a interface gráfica (Inicia IA automaticamente se for macOS Nativo)
+	@OS=$$(uname -s); if [ "$$OS" = "Darwin" ]; then make ai-run-mac; fi
 	$(PYTHON) main.py
-
-test: ## Executa todos os testes BDD com Behave
-	uv run behave
-
-codegen: ## Abre o gerador de código do Playwright manualmente (URL padrão)
-	$(PLAYWRIGHT) codegen https://www.google.com
 
 clean: ## Limpa caches e arquivos temporários
 	find . -type d -name "__pycache__" -exec rm -rf {} +
-	find . -type d -name ".pytest_cache" -exec rm -rf {} +
-	rm -rf gerados/*.py
-
-test-clean: ## Remove relatórios de testes antigos
 	rm -rf .pytest_cache
-	rm -f test-results.xml
+	rm -rf gerados/*.py

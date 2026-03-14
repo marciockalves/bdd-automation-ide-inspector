@@ -5,9 +5,10 @@ from PySide6.QtCore import Qt, Signal
 import qtawesome as qta
 
 class ScenarioEditor(QWidget):
-    # Sinais para comunicação externa
+    # Sinais para comunicação externa (Main Window / Inspector)
     request_start_inspection = Signal()
     request_confirm_capture = Signal()
+    request_ai_assistant = Signal()  # Novo sinal para o Assistente de IA
 
     def __init__(self):
         super().__init__()
@@ -45,7 +46,6 @@ class ScenarioEditor(QWidget):
         self.btn_move_down.setFixedSize(32, 32)
         self.btn_move_down.clicked.connect(self.move_item_down)
 
-        # --- NOVOS BOTÕES: EDITAR E EXCLUIR ---
         # 3. Editar Texto
         self.btn_edit = QPushButton(qta.icon('fa5s.edit', color='#f39c12'), "")
         self.btn_edit.setToolTip("Editar texto do item selecionado")
@@ -57,6 +57,12 @@ class ScenarioEditor(QWidget):
         self.btn_delete.setToolTip("Excluir item selecionado da lista")
         self.btn_delete.setFixedSize(32, 32)
         self.btn_delete.clicked.connect(self.delete_item)
+
+        # --- NOVO BOTÃO: ASSISTENTE DE IA ---
+        self.btn_ai = QPushButton(qta.icon('fa5s.magic', color='#8e44ad'), "")
+        self.btn_ai.setToolTip("Assistente de IA")
+        self.btn_ai.setFixedSize(32, 32)
+        self.btn_ai.clicked.connect(self.request_ai_assistant.emit)
 
         # --- BOTÕES DE INSPEÇÃO ---
         # 5. Iniciar Inspeção
@@ -71,12 +77,17 @@ class ScenarioEditor(QWidget):
         self.btn_capture.setFixedSize(32, 32)
         self.btn_capture.clicked.connect(self.request_confirm_capture.emit)
 
-        # Montagem do Layout
+        # Montagem do Layout Horizontal
         bar_layout.addWidget(self.btn_move_up)
         bar_layout.addWidget(self.btn_move_down)
         bar_layout.addWidget(self.btn_edit)
         bar_layout.addWidget(self.btn_delete)
-        bar_layout.addStretch() 
+        
+        # Botão de IA em destaque antes da inspeção
+        bar_layout.addWidget(self.btn_ai)
+        
+        bar_layout.addStretch() # Empurra os controles de inspeção para a direita
+        
         bar_layout.addWidget(self.btn_start_inspect)
         bar_layout.addWidget(self.btn_capture)
 
@@ -84,27 +95,39 @@ class ScenarioEditor(QWidget):
 
         # --- BOTÃO DE EXPORTAÇÃO ---
         self.btn_export = QPushButton(qta.icon('fa5s.code', color='white'), " GERAR CÓDIGO")
-        self.btn_export.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; height: 35px;")
+        self.btn_export.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60; 
+                color: white; 
+                font-weight: bold; 
+                height: 35px;
+                border-radius: 4px;
+            }
+            QPushButton:hover { background-color: #2ecc71; }
+        """)
         layout.addWidget(self.btn_export)
 
-    # --- MÉTODOS DE LÓGICA ---
+    # --- MÉTODOS DE LÓGICA E MOVIMENTAÇÃO ---
 
     def add_step(self):
         text = self.input_step.text().strip()
         if text:
             item = QListWidgetItem(text)
-            item.setData(Qt.UserRole, None) 
+            item.setData(Qt.UserRole, None) # Placeholder para o seletor HTML
             self.list_steps.addItem(item)
             self.input_step.clear()
 
     def edit_item(self):
         item = self.list_steps.currentItem()
         if item:
-            # Remove o check visual temporariamente para edição limpa
+            # Remove temporariamente o check visual para não atrapalhar a edição
             current_text = item.text().replace(" ✔", "")
-            new_text, ok = QInputDialog.getText(self, "Editar Step", "Altere o texto do step:", QLineEdit.Normal, current_text)
+            new_text, ok = QInputDialog.getText(
+                self, "Editar Step", "Altere o texto do step:", 
+                QLineEdit.Normal, current_text
+            )
             if ok and new_text:
-                # Mantém o check se o seletor já existir
+                # Se o item já tinha seletor, mantemos o check visual
                 suffix = " ✔" if item.data(Qt.UserRole) else ""
                 item.setText(new_text + suffix)
 
@@ -126,3 +149,12 @@ class ScenarioEditor(QWidget):
             item = self.list_steps.takeItem(current_row)
             self.list_steps.insertItem(current_row + 1, item)
             self.list_steps.setCurrentRow(current_row + 1)
+
+    def mark_step_as_mapped(self, selector):
+        """Método auxiliar para a Main Window marcar o item como concluído"""
+        item = self.list_steps.currentItem()
+        if item:
+            item.setData(Qt.UserRole, selector)
+            item.setBackground(Qt.green)
+            if " ✔" not in item.text():
+                item.setText(f"{item.text()} ✔")
