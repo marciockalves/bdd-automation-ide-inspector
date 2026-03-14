@@ -93,4 +93,8 @@ Caso prefira rodar isolado em container no Mac.
 - **Mac:** Homebrew instalado (para o modo nativo).
 - **Python:** Gerenciado via `uv`.
 
+### ⚠️ Estabilidade em Linux (NVIDIA)
+Se a aplicação fechar subitamente (Error 139), o sistema está enfrentando um conflito de driver com o Chromium. O comando `make run-ui` utiliza a flag `--disable-gpu` para mitigar isso. Em hardware NVIDIA, a renderização via software é recomendada para o Inspetor BDD para evitar Segmentation Faults durante a captura do DOM.
+
 Desenvolvido por **Marcio Alves**.
+

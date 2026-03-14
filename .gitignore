@@ -8,3 +8,11 @@ wheels/
 
 # Virtual environments
 .venv
+ollama_data/
+ollama_data_mac/
+containers/nvidia/ollama_data/
+containers/mac/ollama_data/
+
+#gerados/
+#test-results.xml
+.pytest_cache/

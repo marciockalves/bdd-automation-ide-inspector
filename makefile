@@ -58,9 +58,17 @@ ai-up-mac-docker: ## (macOS/Docker) Sobe o container Ollama no Mac
 ai-down-mac-docker: ## (macOS/Docker) Para o container Mac
 	docker compose -f $(DOCKER_MAC) down
 
-run-ui: ## Inicia a interface gráfica (Inicia IA automaticamente se for macOS Nativo)
-	@OS=$$(uname -s); if [ "$$OS" = "Darwin" ]; then make ai-run-mac; fi
-	$(PYTHON) main.py
+run-ui: ## Inicia a interface gráfica com segurança máxima contra Segfault
+	@OS=$$(uname -s); \
+	if [ "$$OS" = "Darwin" ]; then \
+		make ai-run-mac; \
+		$(PYTHON) main.py; \
+	elif [ "$$OS" = "Linux" ]; then \
+		echo "🚀 Iniciando no Linux em modo de compatibilidade estável..."; \
+		export QTWEBENGINE_DISABLE_SANDBOX=1; \
+		export QT_XCB_GL_INTEGRATION=none; \
+		$(PYTHON) main.py --disable-gpu --disable-software-rasterizer --no-sandbox; \
+	fi
 
 clean: ## Limpa caches e arquivos temporários
 	find . -type d -name "__pycache__" -exec rm -rf {} +

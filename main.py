@@ -1,10 +1,16 @@
 import os
 import sys
+
+if sys.platform == "linux":
+    # Força a renderização em software se a GPU estiver causando Segfault
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-gpu --no-sandbox --disable-dev-shm-usage"
+
 from PySide6.QtWidgets import QApplication, QMainWindow, QSplitter
 from PySide6.QtCore import QThread, Qt
 
 # Importe suas classes recém-criadas
 from src.editor import ScenarioEditor
+from src.generator import CodeGenerator
 from src.inspector import WebInspector
 from src.ai_engine import BDDTranslator, SemanticScanner, AIInterpreter
 from src.workers import AIWorker
@@ -37,6 +43,9 @@ class MainWindow(QMainWindow):
         
         # 2. Quando o inspetor capturar algo manualmente (seletor vindo do JS)
         self.inspector.element_selected.connect(self.handle_manual_capture)
+        
+        self.generator = CodeGenerator()
+        self.editor.btn_export.clicked.connect(self.export_test_files)
 
     def run_ai_mapping(self):
         current_item = self.editor.list_steps.currentItem()
@@ -78,25 +87,69 @@ class MainWindow(QMainWindow):
     
 
     def handle_ai_success(self, result):
-        """Executado quando a thread da IA termina com sucesso"""
+        """Executado quando a thread da IA termina"""
         self.editor.setEnabled(True)
-        self.statusBar().showMessage("✅ Mapeamento concluído!", 3000)
         
-        # Recupera os elementos novamente para gerar o seletor final
-        # (Em um app real, você passaria o seletor pronto do worker)
-        # Aqui vamos simplificar usando o resultado do índice
-        self.inspector.browser.page().toHtml(lambda html: self.finalize_mapping(html, result))
+        # 1. Recuperamos o item que estava selecionado
+        current_item = self.editor.list_steps.currentItem()
+        if not current_item or 'index' not in result:
+            self.statusBar().showMessage("❌ IA não encontrou um elemento compatível.")
+            return
 
-    def finalize_mapping(self, html, result):
+        # 2. Em vez de re-analisar o HTML, vamos extrair o seletor 
+        # do mapeamento que já temos guardado ou processar rápido:
+        self.inspector.browser.page().toHtml(lambda html: self.finalize_mapping_and_save(html, result, current_item))
+
+    def finalize_mapping_and_save(self, html, result, item):
+        # Gera a lista de elementos novamente baseada no HTML do momento da resposta
         elements = self.scanner.get_simplified_dom(html)
-        target = elements[result['index']]
-        selector = self.scanner.generate_selector(target)
-        self.editor.mark_step_as_mapped(selector)
+        
+        try:
+            target = elements[result['index']]
+            selector = self.scanner.generate_selector(target)
+            
+            # --- O PULO DO GATO ---
+            # Gravamos o seletor no UserRole do item para o gerador de código enxergar
+            item.setData(Qt.UserRole, selector)
+            
+            # Adiciona o check visual
+            if " ✔" not in item.text():
+                item.setText(f"{item.text()} ✔")
+            
+            item.setBackground(Qt.transparent) # Limpa cores de erro se houver
+            self.statusBar().showMessage(f"✅ Step mapeado para: {selector}", 3000)
+            
+        except IndexError:
+            self.statusBar().showMessage("❌ Erro de sincronia no mapeamento.")
 
     def handle_ai_error(self, message):
         """Executado se a IA falhar"""
         self.editor.setEnabled(True)
         self.statusBar().showMessage(f"❌ Erro na IA: {message}", 5000)
+
+    def export_test_files(self):
+        """Pega os dados da lista e gera os arquivos físicos"""
+        steps_data = []
+        for i in range(self.editor.list_steps.count()):
+            item = self.editor.list_steps.item(i)
+            selector = item.data(Qt.UserRole)
+            
+            if selector: # Apenas steps que foram mapeados pela IA ou manual
+                steps_data.append({
+                    "text": item.text().replace(" ✔", ""),
+                    "selector": selector
+                })
+
+        if not steps_data:
+            self.statusBar().showMessage("⚠️ Nenhum step mapeado para exportação!", 5000)
+            return
+
+        # Gera os arquivos
+        feat_path = self.generator.save_feature_file("MeuCenarioIA", steps_data)
+        step_path = self.generator.save_steps_file("MeuCenarioIA", steps_data)
+
+        self.statusBar().showMessage(f"🚀 Arquivos gerados em: {self.generator.output_dir}", 6000)
+        print(f"✅ Sucesso! Arquivos criados:\n- {feat_path}\n- {step_path}")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
