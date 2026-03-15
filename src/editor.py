@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+from PySide6.QtWidgets import (QProgressBar, QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                              QLineEdit, QListWidget, QListWidgetItem, 
                              QPushButton, QFrame, QInputDialog)
 from PySide6.QtCore import Qt, Signal
@@ -106,6 +106,11 @@ class ScenarioEditor(QWidget):
             QPushButton:hover { background-color: #2ecc71; }
         """)
         layout.addWidget(self.btn_export)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0) # Estilo 'Marquee' (fica a andar de um lado para o outro)
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar)
 
     # --- MÉTODOS DE LÓGICA E MOVIMENTAÇÃO ---
 

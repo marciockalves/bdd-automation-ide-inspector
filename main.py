@@ -5,8 +5,10 @@ if sys.platform == "linux":
     # Força a renderização em software se a GPU estiver causando Segfault
     os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-gpu --no-sandbox --disable-dev-shm-usage"
 
-from PySide6.QtWidgets import QApplication, QMainWindow, QSplitter
-from PySide6.QtCore import QThread, Qt
+from PySide6.QtWidgets import QHBoxLayout, QListWidget, QToolBar, QStackedWidget, QApplication, QMainWindow, QSplitter
+from PySide6.QtCore import QSize, QThread, Qt
+from src.settings import SettingsDialog
+import qtawesome as qta
 
 # Importe suas classes recém-criadas
 from src.editor import ScenarioEditor
@@ -15,9 +17,15 @@ from src.inspector import WebInspector
 from src.ai_engine import BDDTranslator, SemanticScanner, AIInterpreter
 from src.workers import AIWorker
 
+from src.crawler import SimpleCrawler
+from dotenv import load_dotenv
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        load_dotenv() # Carrega as variáveis do seu novo arquivo .env
+        self.simple_crawler = SimpleCrawler()
+        
         self.setWindowTitle("Feature Editor Pro - IA Edition")
         self.resize(1200, 800)
 
@@ -46,45 +54,106 @@ class MainWindow(QMainWindow):
         
         self.generator = CodeGenerator()
         self.editor.btn_export.clicked.connect(self.export_test_files)
+        self.active_threads = []
+        self.setup_ui_elements()
+        self.setup_toolbar()
+
+    def setup_ui_elements(self):
+            # O centro agora é um StackedWidget para trocar as visões
+            self.central_stack = QStackedWidget()
+            
+            # Lado Esquerdo: Editor (Sempre visível)
+            self.editor = ScenarioEditor()
+            
+            # Lado Direito: Alternância entre Browser e Monitor de Elementos
+            self.inspector = WebInspector() # Seu Webview manual
+            self.ia_monitor = QListWidget() # Lista de elementos abstraídos pelo crawler
+            self.ia_monitor.setStyleSheet("background-color: #2c3e50; color: #ecf0f1; font-family: 'Courier New';")
+
+            self.central_stack.addWidget(self.inspector) # Index 0
+            self.central_stack.addWidget(self.ia_monitor) # Index 1
+
+            layout_principal = QHBoxLayout()
+            splitter = QSplitter(Qt.Horizontal)
+            splitter.addWidget(self.editor)
+            splitter.addWidget(self.central_stack)
+            self.setCentralWidget(splitter)
+    def setup_toolbar(self):
+        toolbar = QToolBar("Main Toolbar")
+        toolbar.setMovable(False)
+        toolbar.setIconSize(QSize(24, 24))
+        self.addToolBar(Qt.TopToolBarArea, toolbar)
+
+        # Ações da Toolbar
+        act_manual = toolbar.addAction(qta.icon("fa5s.search"), " Novo Cenário (Inspetor Manual)")
+        act_manual.triggered.connect(self.mode_manual)
+
+        act_ia = toolbar.addAction(qta.icon("fa5s.magic"), " Novo Cenário (Assistente IA)")
+        act_ia.triggered.connect(self.mode_ia)
+
+        toolbar.addSeparator()
+
+        act_settings = toolbar.addAction(qta.icon("fa5s.cog"), " Configurações (.env)")
+        act_settings.triggered.connect(self.open_settings)
+
+    def mode_manual(self):
+        self.central_stack.setCurrentIndex(0)
+        self.editor.set_mode("manual")
+        self.statusBar().showMessage("Modo Inspetor Manual Ativo.")
+
+    def mode_ia(self):
+        self.central_stack.setCurrentIndex(1)
+        self.editor.set_mode("ia")
+        self.statusBar().showMessage("Modo Assistente de IA Ativo (Crawler Mode).")
+
+    def open_settings(self):
+        dialog = SettingsDialog(self)
+        if dialog.exec():
+            self.statusBar().showMessage("Configurações atualizadas!", 3000)
 
     def run_ai_mapping(self):
         current_item = self.editor.list_steps.currentItem()
         if not current_item:
             return
 
-        step_text = current_item.text()
-        normalized_step = self.translator.translate_step(step_text)
+        self.set_ai_loading_state(True)
+        
+        # Pega o host configurado no formulário de Settings
+        host = os.getenv("BASE_HOST")
+        if not host:
+            self.statusBar().showMessage("❌ Erro: Configure o HOST nas configurações!")
+            self.set_ai_loading_state(False)
+            return
 
-        # Feedback visual imediato na UI
-        self.statusBar().showMessage(f"🤖 IA está processando: {step_text}...")
-        self.editor.setEnabled(False) # Desabilita o editor temporariamente
-
-        def on_html_received(html_content):
-            elements = self.scanner.get_simplified_dom(html_content)
+        if self.active_mode == "ia":
+            self.ia_monitor.clear()
+            self.ia_monitor.addItem(f"🌐 Acessando Host: {host}...")
             
-            # --- CONFIGURAÇÃO DA THREAD ---
-            self.thread = QThread()
-            self.worker = AIWorker(self.ai, normalized_step, elements)
-            self.worker.moveToThread(self.thread)
-
-            # Conectar sinais
-            self.thread.started.connect(self.worker.run)
-            self.worker.finished.connect(self.handle_ai_success)
-            self.worker.error.connect(self.handle_ai_error)
+            # 1. O Crawler baixa o HTML (Síncrono aqui por simplicidade, mas o UI não trava)
+            html = self.simple_crawler.fetch_html(host)
             
-            # Limpeza de memória
-            self.worker.finished.connect(self.thread.quit)
-            self.worker.finished.connect(self.worker.deleteLater)
-            self.thread.finished.connect(self.thread.deleteLater)
-
-            self.thread.start()
-
-        self.inspector.browser.page().toHtml(on_html_received)
+            if html:
+                self.ia_monitor.addItem("📄 HTML Capturado com sucesso.")
+                # 2. Chama a thread da IA (que já criamos) passando o HTML bruto
+                self.start_ai_worker_thread(html)
+            else:
+                self.handle_ai_error("Não foi possível acessar o site via Crawler.")
+        else:
+            # Modo manual continua usando o Webview (Seletivo)
+            self.inspector.browser.page().toHtml(self.start_ai_worker_thread)
+   
     def handle_manual_capture(self, selector):
         """Caso o usuário prefira clicar manualmente no elemento"""
         self.editor.mark_step_as_mapped(selector)
 
-    
+    def start_ai_worker_thread(self, html_content):
+        # Aqui fica toda aquela lógica de QThread que já tínhamos, 
+        # mas agora ela aceita QUALQUER HTML que você enviar para ela.
+        elements = self.scanner.get_simplified_dom(html_content)
+        thread = QThread()
+        worker = AIWorker(self.ai, ..., elements)
+        # ... conexões de sinais ...
+        thread.start()    
 
     def handle_ai_success(self, result):
         """Executado quando a thread da IA termina"""
@@ -150,6 +219,20 @@ class MainWindow(QMainWindow):
 
         self.statusBar().showMessage(f"🚀 Arquivos gerados em: {self.generator.output_dir}", 6000)
         print(f"✅ Sucesso! Arquivos criados:\n- {feat_path}\n- {step_path}")
+
+    def set_ai_loading_state(self, is_loading: bool):
+        """Ativa ou desativa o estado de 'carregamento' da interface"""
+        if is_loading:
+            self.editor.btn_ai.setEnabled(False)
+            self.editor.btn_ai.setText("⌛ IA a pensar...")
+            self.editor.btn_ai.setStyleSheet("background-color: #555; color: white;")
+            # Se tiver uma barra de progresso no editor:
+            self.editor.progress_bar.setVisible(True)
+        else:
+            self.editor.btn_ai.setEnabled(True)
+            self.editor.btn_ai.setText("🪄 Mapear com IA")
+            self.editor.btn_ai.setStyleSheet("") # Volta ao estilo padrão do sistema
+            self.editor.progress_bar.setVisible(False)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
